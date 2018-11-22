@@ -5,6 +5,7 @@
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <iostream>
+#include <algorithm>
 #include "CPU_ORB.h"
 namespace MORB
 {
@@ -31,16 +32,38 @@ namespace MORB
 		printf("orb_cpu execution time = %gms\n", costtime*1000. / cv::getTickFrequency());//转换时间单位并输出代码运行时间
 	}
 
-	void ORB_CPU::MatchPic(ORB_CPU &orb1, ORB_CPU &orb2)
+	void ORB_CPU::MatchPic(ORB_CPU &orb1, ORB_CPU &orb2, bool cross, bool matchfilter)
 	{
 		double startime = (double)cv::getTickCount();//开始计时
 		//创建特征点比较器，然后创建比较结果向量，DMatch是opencv中的一种类型，用于进行特征矩阵比较。
-		cv::BFMatcher matcher(cv::NORM_HAMMING);
-		std::vector<cv::DMatch> mathces;
-		matcher.match(orb1.descriptors, orb2.descriptors, mathces);	//将两幅图像的匹配结果放入mathces向量中，向量每个成员记录了哪一对匹配点
+		cv::BFMatcher matcher(cv::NORM_HAMMING, cross);
+		std::vector<cv::DMatch> matches;
+		matcher.match(orb1.descriptors, orb2.descriptors, matches);	//将两幅图像的匹配结果放入mathces向量中，向量每个成员记录了哪一对匹配点
+		//根据需要进行hamming距离滤波，如果距离大于2倍该匹配集中最短汉明距离的点去除掉。
+		if (matchfilter)
+		{
+			// 初始化最大距离和最小距离
+			double min_dist = 1000, max_dist = 0;
+			// 找出该匹配集中所有匹配之间的最大值和最小值
+			for (int i = 0; i < matches.size(); i++)
+			{
+				double dist = matches[i].distance;
+				if (dist < min_dist) min_dist = dist;
+				if (dist > max_dist) max_dist = dist;
+			}
+			// 当描述子之间的距离大于2倍的最小距离时，即认为该匹配是一个错误的匹配。
+			// 但有时描述子之间的最小距离非常小，会导致两倍最小距离也很小。这时可以设置一个经验值作为下限
+			for (vector<cv::DMatch>::iterator i = matches.begin(); i != matches.end(); )
+			{
+				if (i->distance > max(2 * min_dist, 30.0))
+					matches.erase(i);
+				else
+					i++;	//只有当不需要删除错误匹配时才++。因为删除了错误匹配后，后面一个点就又到脚下了。
+			}
+		}
 		//将匹配结果用线进行了链接组成合体图
 		cv::Mat img_mathes;
-		cv::drawMatches(orb1.rawimage, orb1.keypoints, orb2.rawimage, orb2.keypoints, mathces, img_mathes);
+		cv::drawMatches(orb1.rawimage, orb1.keypoints, orb2.rawimage, orb2.keypoints, matches, img_mathes);
 		//结束时间计算，并打印
 		double costtime = (double)cv::getTickCount() - startime;//代码运行时间=结束时间-开始时间
 		printf("cpu match time = %gms\n", costtime*1000. / cv::getTickFrequency());//转换时间单位并输出代码运行时间
